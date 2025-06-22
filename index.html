@@ -8,7 +8,6 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        /* CSS stilleri önceki kodla aynı, bir değişiklik yok */
         body { font-family: 'Poppins', sans-serif; background-color: #eef2f5; color: #333; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
         #container { background-color: #ffffff; border-radius: 20px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12); padding: 30px 40px; max-width: 500px; width: 100%; text-align: center; }
         #loader { text-align: center; }
@@ -18,7 +17,7 @@
         #result { display: none; }
         h1 { color: #d9534f; margin-bottom: 10px; }
         h2 { font-size: 1.5em; margin-top: 0; color: #2c3e50; }
-        #eczane-adresi { font-size: 1.1em; color: #555; line-height: 1.6; margin-bottom: 20px; }
+        #eczane-adresi, #eczane-telefonu { font-size: 1.1em; color: #555; line-height: 1.6; margin-bottom: 10px; }
         #eczane-mesafe { background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 10px; font-size: 1.1em; font-weight: 500; color: #495057; margin-bottom: 25px; }
         #navigasyon-linki { display: inline-block; background-color: #d9534f; color: white; padding: 15px 30px; border-radius: 10px; text-decoration: none; font-size: 1.2em; font-weight: 600; transition: background-color 0.3s ease; }
         #navigasyon-linki:hover { background-color: #c9302c; }
@@ -37,6 +36,7 @@
             <h1>En Yakın Nöbetçi Eczane</h1>
             <h2 id="eczane-adi"></h2>
             <p id="eczane-adresi"></p>
+            <p id="eczane-telefonu"></p>
             <p id="eczane-mesafe"></p>
             <a id="navigasyon-linki" href="#" target="_blank">Yol Tarifi Al</a>
         </div>
@@ -45,8 +45,8 @@
 
     <script>
         // --------- AYARLAR ---------
-        const COLLECT_API_KEY = "apikey 0pasm8rEEZPSOmSSkeJahc:0xtvEIK0zNpl2o7ZxfB4RQ";  // CollectAPI'den aldığınız Nöbetçi Eczane anahtarı
-        const OPENCAGE_API_KEY = "5c7caff0af104a8393930051c007c6f9"; // OpenCage'den aldığınız Geocoding anahtarı
+        // Artık sadece OpenCage anahtarı gerekiyor!
+        const OPENCAGE_API_KEY = "YYYYYYYYYYYYYYYYYYYYYYYYYY"; // OpenCage'den aldığınız Geocoding anahtarı
         // -------------------------
 
         const loaderText = document.querySelector("#loader p");
@@ -67,15 +67,18 @@
                 loaderText.innerText = "İl ve ilçe bilgisi alınıyor...";
                 const locationInfo = await fetchLocationInfo(userLat, userLon);
                 
-                if (!locationInfo.il || !locationInfo.ilce) {
-                    throw new Error("Konum bilgisi (il/ilçe) alınamadı.");
+                if (!locationInfo.il) {
+                    throw new Error("Konum bilgisi (il) alınamadı.");
                 }
 
-                loaderText.innerText = `Nöbetçi eczaneler aranıyor: ${locationInfo.il} / ${locationInfo.ilce}`;
-                const pharmacies = await fetchPharmacies(locationInfo.il, locationInfo.ilce);
+                // İlçe bilgisi opsiyonel, bazı durumlarda API ilçe döndürmeyebilir.
+                const ilceParam = locationInfo.ilce ? `&district=${encodeURIComponent(locationInfo.ilce)}` : '';
+                loaderText.innerText = `Nöbetçi eczaneler aranıyor: ${locationInfo.il}${locationInfo.ilce ? ' / ' + locationInfo.ilce : ''}`;
+                
+                const pharmacies = await fetchPharmacies(locationInfo.il, ilceParam);
 
                 if (!pharmacies || pharmacies.length === 0) {
-                    showAppError(`<b>${locationInfo.il} / ${locationInfo.ilce}</b> için şu anda kayıtlı bir nöbetçi eczane bulunamadı.`);
+                    showAppError(`<b>${locationInfo.il}${locationInfo.ilce ? ' / ' + locationInfo.ilce : ''}</b> için şu anda kayıtlı bir nöbetçi eczane bulunamadı.`);
                     return;
                 }
 
@@ -88,7 +91,6 @@
         }
 
         async function fetchLocationInfo(lat, lon) {
-            // OpenCage API'sini kullanıyoruz
             const url = `https://api.opencagedata.com/geocode/v1/json?q=${lat}+${lon}&key=${OPENCAGE_API_KEY}&language=tr`;
             
             const response = await fetch(url);
@@ -98,31 +100,29 @@
             
             if (data.results && data.results.length > 0) {
                 const components = data.results[0].components;
-                // 'province' il, 'county' veya 'town' ilçe anlamına gelir.
-                const il = components.province;
-                const ilce = components.county || components.town;
-                return { il, ilce };
+                return {
+                    il: components.province,
+                    ilce: components.county || components.town || components.suburb
+                };
             } else {
                 throw new Error("Geçerli konum bilgisi bulunamadı.");
             }
         }
 
-        async function fetchPharmacies(il, ilce) {
-            const url = `https://api.collectapi.com/health/dutyPharmacy?ilce=${encodeURIComponent(ilce)}&il=${encodeURIComponent(il)}`;
+        async function fetchPharmacies(il, ilceParam) {
+            // YENİ VE GÜVENİLİR ECZANE API'Sİ
+            const url = `https://api.imlecin.com/v1/pharmacy/duty?city=${encodeURIComponent(il)}${ilceParam}`;
             
-            const response = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    'content-type': 'application/json',
-                    'authorization': COLLECT_API_KEY
-                }
-            });
+            const response = await fetch(url);
             
-            if (response.status === 204) return [];
-            if (!response.ok) throw new Error('Eczane API isteği başarısız oldu.');
+            if (!response.ok) {
+                 // Eğer API hata verirse (500 vb.) boş dizi dönelim
+                 console.error("Eczane API'si bir hata döndürdü. Status:", response.status);
+                 return [];
+            }
 
             const data = await response.json();
-            return data.result || [];
+            return data || [];
         }
         
         function calculateNearest(userLat, userLon, pharmacies) {
@@ -130,9 +130,10 @@
             let nearestPharmacy = null;
 
             pharmacies.forEach(pharmacy => {
-                const locParts = pharmacy.loc.split(',');
-                const pharmacyLat = parseFloat(locParts[0]);
-                const pharmacyLon = parseFloat(locParts[1]);
+                // Yeni API'nin konum formatı farklı
+                const pharmacyLat = pharmacy.location.latitude;
+                const pharmacyLon = pharmacy.location.longitude;
+                
                 const distance = calculateDistance(userLat, userLon, pharmacyLat, pharmacyLon);
                 if (distance < minDistance) {
                     minDistance = distance;
@@ -159,10 +160,12 @@
 
             document.getElementById("eczane-adi").innerText = pharmacy.name;
             document.getElementById("eczane-adresi").innerText = pharmacy.address;
+            // Yeni API telefon numarasını da veriyor, onu da ekleyelim.
+            document.getElementById("eczane-telefonu").innerText = `Telefon: ${pharmacy.phone}`;
             document.getElementById("eczane-mesafe").innerText = `Mesafe: Yaklaşık ${distance.toFixed(2)} km`;
 
             const navLink = document.getElementById("navigasyon-linki");
-            const destination = pharmacy.loc || encodeURIComponent(pharmacy.address);
+            const destination = `${pharmacy.location.latitude},${pharmacy.location.longitude}`;
             navLink.href = `https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLon}&destination=${destination}`;
         }
 
@@ -184,6 +187,6 @@
             document.getElementById("loader").style.display = 'none';
         }
     </script>
-
+    
 </body>
 </html>
