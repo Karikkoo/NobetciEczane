@@ -22,6 +22,7 @@
         #navigasyon-linki { display: inline-block; background-color: #d9534f; color: white; padding: 15px 30px; border-radius: 10px; text-decoration: none; font-size: 1.2em; font-weight: 600; transition: background-color 0.3s ease; }
         #navigasyon-linki:hover { background-color: #c9302c; }
         #error { color: #a94442; background-color: #f2dede; border: 1px solid #ebccd1; padding: 15px; border-radius: 8px; }
+        #error a { color: #a94442; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -83,17 +84,29 @@
                 displayResult(userLat, userLon, nearest.pharmacy, nearest.distance);
 
             } catch (error) {
-                showAppError("Bir hata oluştu: " + error.message);
+                // Hata mesajını zaten fonksiyon içinde gösteriyoruz, burada tekrar göstermeye gerek yok.
+                console.error("Ana işlem sırasında bir hata oluştu:", error);
             }
         }
         
         async function scrapePharmacies() {
-            // CORS engelini aşmak için bir proxy (aracı) kullanıyoruz.
-            const proxyUrl = 'https://api.allorigins.win/raw?url=';
-            const targetUrl = encodeURIComponent('https://www.tuzlaeczaciodasi.org.tr/nobetci-eczaneler');
+            // Yeni ve daha güvenilir bir proxy kullanıyoruz
+            const proxyUrl = 'https://cors-anywhere.herokuapp.com/';
+            const targetUrl = 'https://www.tuzlaeczaciodasi.org.tr/nobetci-eczaneler';
             
-            const response = await fetch(proxyUrl + targetUrl);
-            if (!response.ok) throw new Error("Eczane sitesinden veri çekilemedi.");
+            const fullUrl = proxyUrl + targetUrl;
+
+            const response = await fetch(fullUrl);
+            
+            // Eğer proxy erişim izni gerektiriyorsa (ilk kullanımda olur), kullanıcıyı bilgilendir.
+            if (response.status === 403) {
+                showAppError(`Proxy erişim izni gerekiyor. Lütfen <a href="${proxyUrl}${targetUrl}" target="_blank"><b>buraya tıklayıp</b></a> açılan sayfada 'Request temporary access' butonuna basın ve ardından bu sayfayı yenileyin.`);
+                throw new Error("Proxy erişimi gerekli.");
+            }
+            
+            if (!response.ok) {
+                 throw new Error("Eczane sitesinden veri çekilemedi. Lütfen daha sonra tekrar deneyin.");
+            }
             
             const html = await response.text();
             
@@ -174,7 +187,6 @@
             navLink.href = `https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLon}&destination=${destination}`;
         }
         
-        // showError ve showAppError fonksiyonları aynı kalacak
         function showError(error) {
             let message;
             switch(error.code) {
