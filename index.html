@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>En Yakın Nöbetçi Eczane</title>
+    <title>Tuzla - En Yakın Nöbetçi Eczane</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -30,7 +30,6 @@
         <div id="loader">
             <div class="spinner"></div>
             <p>Konumunuz belirleniyor...</p>
-            <p>Lütfen tarayıcı iznini onaylayın.</p>
         </div>
         <div id="result">
             <h1>En Yakın Nöbetçi Eczane</h1>
@@ -45,7 +44,7 @@
 
     <script>
         // --------- AYARLAR ---------
-        const OPENCAGE_API_KEY = "5c7caff0af104a8393930051c007c6f9"; // OpenCage'den aldığınız Geocoding anahtarını buraya yapıştırın.
+        const OPENCAGE_API_KEY = "YYYYYYYYYYYYYYYYYYYYYYYYYY"; // OpenCage'den aldığınız Geocoding anahtarını buraya yapıştırın.
         // -------------------------
 
         const loaderText = document.querySelector("#loader p");
@@ -63,82 +62,90 @@
             const userLon = position.coords.longitude;
             
             try {
-                loaderText.innerText = "İl ve ilçe bilgisi alınıyor...";
-                const locationInfo = await fetchLocationInfo(userLat, userLon);
-                
-                if (!locationInfo.il) {
-                    throw new Error("Konum bilgisi (il) alınamadı.");
-                }
-
-                const ilceText = locationInfo.ilce ? ` / ${locationInfo.ilce}` : '';
-                loaderText.innerText = `Nöbetçi eczaneler aranıyor: ${locationInfo.il}${ilceText}`;
-                
-                const pharmacies = await fetchPharmacies(locationInfo.il, locationInfo.ilce);
+                loaderText.innerText = "Nöbetçi eczane listesi alınıyor...";
+                let pharmacies = await scrapePharmacies();
 
                 if (!pharmacies || pharmacies.length === 0) {
-                    showAppError(`<b>${locationInfo.il}${ilceText}</b> için şu anda kayıtlı bir nöbetçi eczane bulunamadı.`);
+                    showAppError(`<b>Tuzla</b> için şu anda nöbetçi eczane bilgisi alınamadı veya bulunamadı.`);
                     return;
                 }
+                
+                loaderText.innerText = "Eczane konumları belirleniyor...";
+                pharmacies = await geocodePharmacies(pharmacies);
 
                 const nearest = calculateNearest(userLat, userLon, pharmacies);
+                
+                if(!nearest.pharmacy) {
+                     showAppError(`Yakınınızda bir nöbetçi eczane bulunamadı veya konumları belirlenemedi.`);
+                     return;
+                }
+                
                 displayResult(userLat, userLon, nearest.pharmacy, nearest.distance);
 
             } catch (error) {
                 showAppError("Bir hata oluştu: " + error.message);
             }
         }
-
-        async function fetchLocationInfo(lat, lon) {
-            const url = `https://api.opencagedata.com/geocode/v1/json?q=${lat}+${lon}&key=${OPENCAGE_API_KEY}&language=tr`;
-            
-            const response = await fetch(url);
-            if (!response.ok) throw new Error('Konum API isteği başarısız oldu.');
-            
-            const data = await response.json();
-            
-            if (data.results && data.results.length > 0) {
-                const components = data.results[0].components;
-                // OpenCage API, Türkiye il ve ilçe isimlerini İngilizce karakterlerle verebilir (örn: 'Istanbul').
-                // Eczane API'si Türkçe karakter bekleyebileceğinden, bu isimleri URL'de encode etmek önemlidir.
-                return {
-                    il: components.province,
-                    ilce: components.county || components.town || components.suburb
-                };
-            } else {
-                throw new Error("Geçerli konum bilgisi bulunamadı.");
-            }
-        }
-
-        async function fetchPharmacies(il, ilce) {
-            // ecza.io API'si ilçe bilgisi olmadan da çalışabilir, bu yüzden ilçe varsa ekliyoruz.
-            const ilceParam = ilce ? `&district=${encodeURIComponent(ilce)}` : '';
-            const url = `https://api.ecza.io/v1/pharmacies/duty?city=${encodeURIComponent(il)}${ilceParam}`;
-            
-            const response = await fetch(url);
-            
-            if (!response.ok) {
-                 console.error("Eczane API'si bir hata döndürdü. Status:", response.status);
-                 throw new Error("Nöbetçi eczane verileri alınamadı.");
-            }
-
-            const data = await response.json();
-            return data.result || [];
-        }
         
+        async function scrapePharmacies() {
+            // CORS engelini aşmak için bir proxy (aracı) kullanıyoruz.
+            const proxyUrl = 'https://api.allorigins.win/raw?url=';
+            const targetUrl = encodeURIComponent('https://www.tuzlaeczaciodasi.org.tr/nobetci-eczaneler');
+            
+            const response = await fetch(proxyUrl + targetUrl);
+            if (!response.ok) throw new Error("Eczane sitesinden veri çekilemedi.");
+            
+            const html = await response.text();
+            
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            
+            const pharmacyCards = doc.querySelectorAll('.dutypharmacy-card');
+            const pharmacies = [];
+            
+            pharmacyCards.forEach(card => {
+                const name = card.querySelector('h3')?.innerText.trim();
+                const address = card.querySelector('p:nth-of-type(1)')?.innerText.replace('Adres:', '').trim();
+                const phone = card.querySelector('p:nth-of-type(2)')?.innerText.replace('Telefon:', '').trim();
+                
+                if (name && address && phone) {
+                    pharmacies.push({ name, address, phone });
+                }
+            });
+            
+            return pharmacies;
+        }
+
+        async function geocodePharmacies(pharmacies) {
+            const geocodedPharmacies = [];
+            for (const pharmacy of pharmacies) {
+                try {
+                    const url = `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(pharmacy.address + ', Tuzla, İstanbul')}&key=${OPENCAGE_API_KEY}&language=tr&limit=1`;
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    if (data.results && data.results.length > 0) {
+                        pharmacy.latitude = data.results[0].geometry.lat;
+                        pharmacy.longitude = data.results[0].geometry.lng;
+                        geocodedPharmacies.push(pharmacy);
+                    }
+                } catch (error) {
+                    console.error(`Adres çözümlenemedi: ${pharmacy.address}`, error);
+                }
+            }
+            return geocodedPharmacies;
+        }
+
         function calculateNearest(userLat, userLon, pharmacies) {
             let minDistance = Infinity;
             let nearestPharmacy = null;
 
             pharmacies.forEach(pharmacy => {
-                // ecza.io'dan gelen konum formatı: "lat, lon" şeklinde bir string.
-                const locParts = pharmacy.loc.split(',');
-                const pharmacyLat = parseFloat(locParts[0]);
-                const pharmacyLon = parseFloat(locParts[1]);
-                
-                const distance = calculateDistance(userLat, userLon, pharmacyLat, pharmacyLon);
-                if (distance < minDistance) {
-                    minDistance = distance;
-                    nearestPharmacy = pharmacy;
+                if (pharmacy.latitude && pharmacy.longitude) {
+                    const distance = calculateDistance(userLat, userLon, pharmacy.latitude, pharmacy.longitude);
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        nearestPharmacy = pharmacy;
+                    }
                 }
             });
             return { pharmacy: nearestPharmacy, distance: minDistance };
@@ -148,9 +155,7 @@
             const R = 6371; // km
             const dLat = (lat2 - lat1) * Math.PI / 180;
             const dLon = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
             return R * c;
         }
@@ -165,11 +170,11 @@
             document.getElementById("eczane-mesafe").innerText = `Mesafe: Yaklaşık ${distance.toFixed(2)} km`;
 
             const navLink = document.getElementById("navigasyon-linki");
-            // ecza.io'dan gelen 'loc' verisi direkt olarak Google Maps URL'i için uygun formatta.
-            const destination = pharmacy.loc; 
+            const destination = `${pharmacy.latitude},${pharmacy.longitude}`;
             navLink.href = `https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLon}&destination=${destination}`;
         }
-
+        
+        // showError ve showAppError fonksiyonları aynı kalacak
         function showError(error) {
             let message;
             switch(error.code) {
