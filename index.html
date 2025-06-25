@@ -45,8 +45,7 @@
 
     <script>
         // --------- AYARLAR ---------
-        // Artık sadece OpenCage anahtarı gerekiyor!
-        const OPENCAGE_API_KEY = "YYYYYYYYYYYYYYYYYYYYYYYYYY"; // OpenCage'den aldığınız Geocoding anahtarı
+        const OPENCAGE_API_KEY = "5c7caff0af104a8393930051c007c6f9"; // OpenCage'den aldığınız Geocoding anahtarını buraya yapıştırın.
         // -------------------------
 
         const loaderText = document.querySelector("#loader p");
@@ -71,14 +70,13 @@
                     throw new Error("Konum bilgisi (il) alınamadı.");
                 }
 
-                // İlçe bilgisi opsiyonel, bazı durumlarda API ilçe döndürmeyebilir.
-                const ilceParam = locationInfo.ilce ? `&district=${encodeURIComponent(locationInfo.ilce)}` : '';
-                loaderText.innerText = `Nöbetçi eczaneler aranıyor: ${locationInfo.il}${locationInfo.ilce ? ' / ' + locationInfo.ilce : ''}`;
+                const ilceText = locationInfo.ilce ? ` / ${locationInfo.ilce}` : '';
+                loaderText.innerText = `Nöbetçi eczaneler aranıyor: ${locationInfo.il}${ilceText}`;
                 
-                const pharmacies = await fetchPharmacies(locationInfo.il, ilceParam);
+                const pharmacies = await fetchPharmacies(locationInfo.il, locationInfo.ilce);
 
                 if (!pharmacies || pharmacies.length === 0) {
-                    showAppError(`<b>${locationInfo.il}${locationInfo.ilce ? ' / ' + locationInfo.ilce : ''}</b> için şu anda kayıtlı bir nöbetçi eczane bulunamadı.`);
+                    showAppError(`<b>${locationInfo.il}${ilceText}</b> için şu anda kayıtlı bir nöbetçi eczane bulunamadı.`);
                     return;
                 }
 
@@ -100,6 +98,8 @@
             
             if (data.results && data.results.length > 0) {
                 const components = data.results[0].components;
+                // OpenCage API, Türkiye il ve ilçe isimlerini İngilizce karakterlerle verebilir (örn: 'Istanbul').
+                // Eczane API'si Türkçe karakter bekleyebileceğinden, bu isimleri URL'de encode etmek önemlidir.
                 return {
                     il: components.province,
                     ilce: components.county || components.town || components.suburb
@@ -109,20 +109,20 @@
             }
         }
 
-        async function fetchPharmacies(il, ilceParam) {
-            // YENİ VE GÜVENİLİR ECZANE API'Sİ
-            const url = `https://api.imlecin.com/v1/pharmacy/duty?city=${encodeURIComponent(il)}${ilceParam}`;
+        async function fetchPharmacies(il, ilce) {
+            // ecza.io API'si ilçe bilgisi olmadan da çalışabilir, bu yüzden ilçe varsa ekliyoruz.
+            const ilceParam = ilce ? `&district=${encodeURIComponent(ilce)}` : '';
+            const url = `https://api.ecza.io/v1/pharmacies/duty?city=${encodeURIComponent(il)}${ilceParam}`;
             
             const response = await fetch(url);
             
             if (!response.ok) {
-                 // Eğer API hata verirse (500 vb.) boş dizi dönelim
                  console.error("Eczane API'si bir hata döndürdü. Status:", response.status);
-                 return [];
+                 throw new Error("Nöbetçi eczane verileri alınamadı.");
             }
 
             const data = await response.json();
-            return data || [];
+            return data.result || [];
         }
         
         function calculateNearest(userLat, userLon, pharmacies) {
@@ -130,9 +130,10 @@
             let nearestPharmacy = null;
 
             pharmacies.forEach(pharmacy => {
-                // Yeni API'nin konum formatı farklı
-                const pharmacyLat = pharmacy.location.latitude;
-                const pharmacyLon = pharmacy.location.longitude;
+                // ecza.io'dan gelen konum formatı: "lat, lon" şeklinde bir string.
+                const locParts = pharmacy.loc.split(',');
+                const pharmacyLat = parseFloat(locParts[0]);
+                const pharmacyLon = parseFloat(locParts[1]);
                 
                 const distance = calculateDistance(userLat, userLon, pharmacyLat, pharmacyLon);
                 if (distance < minDistance) {
@@ -160,12 +161,12 @@
 
             document.getElementById("eczane-adi").innerText = pharmacy.name;
             document.getElementById("eczane-adresi").innerText = pharmacy.address;
-            // Yeni API telefon numarasını da veriyor, onu da ekleyelim.
             document.getElementById("eczane-telefonu").innerText = `Telefon: ${pharmacy.phone}`;
             document.getElementById("eczane-mesafe").innerText = `Mesafe: Yaklaşık ${distance.toFixed(2)} km`;
 
             const navLink = document.getElementById("navigasyon-linki");
-            const destination = `${pharmacy.location.latitude},${pharmacy.location.longitude}`;
+            // ecza.io'dan gelen 'loc' verisi direkt olarak Google Maps URL'i için uygun formatta.
+            const destination = pharmacy.loc; 
             navLink.href = `https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLon}&destination=${destination}`;
         }
 
