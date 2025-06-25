@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tuzla - En Yakın Nöbetçi Eczane</title>
+    <title>En Yakın Nöbetçi Eczane</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -22,7 +22,6 @@
         #navigasyon-linki { display: inline-block; background-color: #d9534f; color: white; padding: 15px 30px; border-radius: 10px; text-decoration: none; font-size: 1.2em; font-weight: 600; transition: background-color 0.3s ease; }
         #navigasyon-linki:hover { background-color: #c9302c; }
         #error { color: #a94442; background-color: #f2dede; border: 1px solid #ebccd1; padding: 15px; border-radius: 8px; }
-        #error a { color: #a94442; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -44,10 +43,6 @@
     </div>
 
     <script>
-        // --------- AYARLAR ---------
-        const OPENCAGE_API_KEY = "YYYYYYYYYYYYYYYYYYYYYYYYYY"; // OpenCage'den aldığınız Geocoding anahtarını buraya yapıştırın.
-        // -------------------------
-
         const loaderText = document.querySelector("#loader p");
 
         window.onload = () => {
@@ -63,89 +58,84 @@
             const userLon = position.coords.longitude;
             
             try {
-                loaderText.innerText = "Nöbetçi eczane listesi alınıyor...";
-                let pharmacies = await scrapePharmacies();
+                loaderText.innerText = "İl bilginiz alınıyor...";
+                const cityName = await getCityFromCoords(userLat, userLon);
+
+                if (!cityName) {
+                    throw new Error("Konumdan il bilgisi alınamadı.");
+                }
+
+                loaderText.innerText = `${cityName} için nöbetçi eczaneler aranıyor...`;
+                const pharmacies = await scrapePharmacies(cityName);
 
                 if (!pharmacies || pharmacies.length === 0) {
-                    showAppError(`<b>Tuzla</b> için şu anda nöbetçi eczane bilgisi alınamadı veya bulunamadı.`);
+                    showAppError(`<b>${cityName}</b> için şu anda nöbetçi eczane bulunamadı.`);
                     return;
                 }
-                
-                loaderText.innerText = "Eczane konumları belirleniyor...";
-                pharmacies = await geocodePharmacies(pharmacies);
 
                 const nearest = calculateNearest(userLat, userLon, pharmacies);
                 
                 if(!nearest.pharmacy) {
-                     showAppError(`Yakınınızda bir nöbetçi eczane bulunamadı veya konumları belirlenemedi.`);
+                     showAppError(`Yakınınızda bir nöbetçi eczane bulunamadı.`);
                      return;
                 }
                 
                 displayResult(userLat, userLon, nearest.pharmacy, nearest.distance);
 
             } catch (error) {
-                // Hata mesajını zaten fonksiyon içinde gösteriyoruz, burada tekrar göstermeye gerek yok.
-                console.error("Ana işlem sırasında bir hata oluştu:", error);
+                showAppError("Bir hata oluştu: " + error.message);
             }
         }
         
-        async function scrapePharmacies() {
-            // Yeni ve daha güvenilir bir proxy kullanıyoruz
-            const proxyUrl = 'https://cors-anywhere.herokuapp.com/';
-            const targetUrl = 'https://www.tuzlaeczaciodasi.org.tr/nobetci-eczaneler';
-            
-            const fullUrl = proxyUrl + targetUrl;
+        async function getCityFromCoords(lat, lon) {
+             // API anahtarı gerektirmeyen ücretsiz bir ters geocoding servisi kullanıyoruz.
+            const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=tr`;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error("Konum servisine ulaşılamadı.");
+            const data = await response.json();
+            // "state" genellikle il anlamına gelir.
+            return data.address.state || null;
+        }
 
-            const response = await fetch(fullUrl);
+        async function scrapePharmacies(cityName) {
+            // Türkçe karakterleri ve boşlukları URL için uygun formata çeviriyoruz.
+            const citySlug = cityName.toLowerCase()
+                                .replace(/ /g, '-')
+                                .replace(/ı/g, 'i')
+                                .replace(/ğ/g, 'g')
+                                .replace(/ü/g, 'u')
+                                .replace(/ş/g, 's')
+                                .replace(/ö/g, 'o')
+                                .replace(/ç/g, 'c');
+
+            const proxyUrl = 'https://api.allorigins.win/raw?url=';
+            const targetUrl = encodeURIComponent(`https://www.eczaneler.gen.tr/nobetci-${citySlug}`);
             
-            // Eğer proxy erişim izni gerektiriyorsa (ilk kullanımda olur), kullanıcıyı bilgilendir.
-            if (response.status === 403) {
-                showAppError(`Proxy erişim izni gerekiyor. Lütfen <a href="${proxyUrl}${targetUrl}" target="_blank"><b>buraya tıklayıp</b></a> açılan sayfada 'Request temporary access' butonuna basın ve ardından bu sayfayı yenileyin.`);
-                throw new Error("Proxy erişimi gerekli.");
-            }
-            
-            if (!response.ok) {
-                 throw new Error("Eczane sitesinden veri çekilemedi. Lütfen daha sonra tekrar deneyin.");
-            }
+            const response = await fetch(proxyUrl + targetUrl);
+            if (!response.ok) throw new Error("Eczane sitesinden veri çekilemedi.");
             
             const html = await response.text();
-            
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
             
-            const pharmacyCards = doc.querySelectorAll('.dutypharmacy-card');
+            const pharmacyRows = doc.querySelectorAll('tbody tr');
             const pharmacies = [];
             
-            pharmacyCards.forEach(card => {
-                const name = card.querySelector('h3')?.innerText.trim();
-                const address = card.querySelector('p:nth-of-type(1)')?.innerText.replace('Adres:', '').trim();
-                const phone = card.querySelector('p:nth-of-type(2)')?.innerText.replace('Telefon:', '').trim();
-                
-                if (name && address && phone) {
-                    pharmacies.push({ name, address, phone });
+            pharmacyRows.forEach(row => {
+                const name = row.querySelector('td:nth-child(1) strong')?.innerText.trim();
+                const address = row.querySelector('td:nth-child(2)')?.innerText.trim();
+                const phone = row.querySelector('td:nth-child(3)')?.innerText.trim();
+                const mapLink = row.querySelector('td:nth-child(4) a')?.href;
+
+                if (name && address && mapLink) {
+                    const coords = mapLink.split('/').pop(); // "41.123,29.123" gibi bir string alır
+                    const [latitude, longitude] = coords.split(',').map(Number); // String'i sayıya çevirir
+                    
+                    pharmacies.push({ name, address, phone, latitude, longitude });
                 }
             });
             
             return pharmacies;
-        }
-
-        async function geocodePharmacies(pharmacies) {
-            const geocodedPharmacies = [];
-            for (const pharmacy of pharmacies) {
-                try {
-                    const url = `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(pharmacy.address + ', Tuzla, İstanbul')}&key=${OPENCAGE_API_KEY}&language=tr&limit=1`;
-                    const response = await fetch(url);
-                    const data = await response.json();
-                    if (data.results && data.results.length > 0) {
-                        pharmacy.latitude = data.results[0].geometry.lat;
-                        pharmacy.longitude = data.results[0].geometry.lng;
-                        geocodedPharmacies.push(pharmacy);
-                    }
-                } catch (error) {
-                    console.error(`Adres çözümlenemedi: ${pharmacy.address}`, error);
-                }
-            }
-            return geocodedPharmacies;
         }
 
         function calculateNearest(userLat, userLon, pharmacies) {
